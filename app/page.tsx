@@ -1,31 +1,34 @@
-import { Effect } from "effect"
-import { Database, RequestId } from "./services"
-import { RSC } from "./runtime"
+import { Effect } from "effect";
+import { Database, RequestId } from "./services";
+import { RSC } from "./runtime";
 
 /**
  * A nested Effect component. It resolves `RequestId` independently, and gets
  * the same value as the page — same request, same runtime.
  */
-const UserList = RSC.Component.make(function* () {
-  const db = yield* Database
-  const users = yield* db.query("select name from users")
+const UserList = RSC.Component.make(function* UserList() {
+  const db = yield* Database;
+  const users = yield* db.query("select name from users");
 
   return (
     <ul className="flex flex-col gap-1">
       {users.map((user) => (
-        <li key={user} className="font-mono text-sm text-zinc-700 dark:text-zinc-300">
+        <li
+          key={user}
+          className="font-mono text-sm text-zinc-700 dark:text-zinc-300"
+        >
           {user}
         </li>
       ))}
     </ul>
-  )
-})
+  );
+});
 
-export default RSC.Component.make(function* () {
-  const requestId = yield* RequestId
-  const db = yield* Database
+export default RSC.Component.make(function* Page() {
+  const requestId = yield* RequestId;
+  const db = yield* Database;
 
-  yield* Effect.log("rendering page")
+  yield* Effect.log("rendering page");
 
   return (
     <main className="mx-auto flex max-w-2xl flex-col gap-8 px-8 py-24">
@@ -39,7 +42,9 @@ export default RSC.Component.make(function* () {
       </dl>
 
       <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-medium text-zinc-500">from a nested component</h2>
+        <h2 className="text-sm font-medium text-zinc-500">
+          from a nested component
+        </h2>
         <UserList />
       </section>
 
@@ -48,5 +53,5 @@ export default RSC.Component.make(function* () {
         after the response, not during it.
       </p>
     </main>
-  )
-})
+  );
+});

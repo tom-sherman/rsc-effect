@@ -1,7 +1,7 @@
-import { Effect, Layer, ManagedRuntime } from "effect"
-import { cache } from "react"
-import type { ReactNode } from "react"
-import { RequestLifecycle } from "./RequestLifecycle"
+import { Effect, Layer, ManagedRuntime } from "effect";
+import { cache } from "react";
+import type { ReactNode } from "react";
+import { RequestLifecycle } from "./RequestLifecycle";
 
 export interface RSCRuntime<R, E> {
   /**
@@ -17,12 +17,12 @@ export interface RSCRuntime<R, E> {
     readonly make: <
       Eff extends Effect.Effect<any, any, R | RequestLifecycle>,
       A extends ReactNode,
-      Args extends Array<any>
+      Args extends Array<any>,
     >(
-      body: (...args: Args) => Generator<Eff, A, never>
-    ) => (...args: Args) => Promise<A>
+      body: (...args: Args) => Generator<Eff, A, never>,
+    ) => (...args: Args) => Promise<A>;
     /* eslint-enable @typescript-eslint/no-explicit-any */
-  }
+  };
 
   /**
    * Run an effect against this request's runtime.
@@ -31,15 +31,15 @@ export interface RSCRuntime<R, E> {
    * and the same per-request lifetime but are not rendering.
    */
   readonly runPromise: <A, EX extends E>(
-    effect: Effect.Effect<A, EX, R | RequestLifecycle>
-  ) => Promise<A>
+    effect: Effect.Effect<A, EX, R | RequestLifecycle>,
+  ) => Promise<A>;
 
   /** The layer this runtime was built from. Handy for tests. */
-  readonly layer: Layer.Layer<R | RequestLifecycle, E, never>
+  readonly layer: Layer.Layer<R | RequestLifecycle, E, never>;
 }
 
 export interface Options<R, E> {
-  readonly layer: Layer.Layer<R | RequestLifecycle, E, never>
+  readonly layer: Layer.Layer<R | RequestLifecycle, E, never>;
 
   /**
    * Share layer-built resources across concurrent requests. Defaults to `true`.
@@ -56,7 +56,7 @@ export interface Options<R, E> {
    *
    * Set to `false` for full per-request isolation.
    */
-  readonly shareResourcesAcrossRequests?: boolean | undefined
+  readonly shareResourcesAcrossRequests?: boolean | undefined;
 }
 
 /**
@@ -78,47 +78,61 @@ export interface Options<R, E> {
  * makes finalizers actually run.
  */
 export const make = <R, E>(options: Options<R, E>): RSCRuntime<R, E> => {
-  const memoMap = options.shareResourcesAcrossRequests === false
-    ? undefined
-    : Layer.makeMemoMapUnsafe()
+  const memoMap =
+    options.shareResourcesAcrossRequests === false
+      ? undefined
+      : Layer.makeMemoMapUnsafe();
 
   /**
    * `cache` is React's per-request memoization, so every component in a single
    * render shares one runtime — and each request gets its own.
    */
   const acquire = cache(() => {
-    const runtime = ManagedRuntime.make(options.layer, { memoMap })
+    const runtime = ManagedRuntime.make(options.layer, { memoMap });
 
     // Registering disposal is itself an effect, because the only way to reach
     // the injected lifecycle implementation is through the layer.
     const ready = runtime.runPromise(
       Effect.flatMap(RequestLifecycle, (lifecycle) =>
         Effect.sync(() => {
-          lifecycle.deferUntilResponseEnd(() => runtime.dispose())
-        }))
-    )
+          lifecycle.deferUntilResponseEnd(() => runtime.dispose());
+        }),
+      ),
+    );
 
-    return { runtime, ready }
-  })
+    return { runtime, ready };
+  });
 
   const runPromise = async <A, EX extends E>(
-    effect: Effect.Effect<A, EX, R | RequestLifecycle>
+    effect: Effect.Effect<A, EX, R | RequestLifecycle>,
   ): Promise<A> => {
-    const { runtime, ready } = acquire()
+    const { runtime, ready } = acquire();
     // Await registration before running anything, so a failure mid-render can
     // never leave an undisposed runtime behind.
-    await ready
-    return runtime.runPromise(effect)
-  }
+    await ready;
+    return runtime.runPromise(effect);
+  };
 
   return {
     layer: options.layer,
     runPromise,
     Component: {
       make: (body) => {
-        const toEffect = Effect.fnUntraced(body)
-        return (...args) => runPromise(toEffect(...args) as never)
-      }
-    }
-  }
-}
+        const toEffect = Effect.fnUntraced(body);
+        const Component = (...args: unknown[]) =>
+          runPromise(
+            toEffect(
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              ...(args as any),
+            ) as never,
+          );
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const displayName = (body as any).displayName;
+        Component.displayName = body.name || displayName || "RSC.Component";
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return Component as any;
+      },
+    },
+  };
+};
