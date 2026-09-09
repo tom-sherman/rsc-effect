@@ -2,6 +2,8 @@ import { Effect } from "effect";
 import { Database } from "../services";
 import { RSC } from "../runtime";
 
+export const dynamic = "force-dynamic";
+
 /**
  * A crash, not an expected error — nothing in the types says this can fail.
  * Effect captures it as a defect, `Cause.squash` unwraps it back to the
