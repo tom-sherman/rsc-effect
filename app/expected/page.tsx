@@ -60,7 +60,7 @@ export default RSC.Component.make(function* ExpectedErrorsPage() {
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-medium text-zinc-500">Effect.catchTag</h2>
         <HandledInline />
-        <h2 className="text-sm font-medium text-zinc-500">onError</h2>
+        <h2 className="text-sm font-medium text-zinc-500">Effect.catch</h2>
         <HandledAtBoundary />
         <h2 className="text-sm font-medium text-zinc-500">no error</h2>
         <Found />

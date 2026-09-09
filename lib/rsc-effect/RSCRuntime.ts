@@ -3,7 +3,13 @@ import { cache } from "react";
 import type { ReactNode } from "react";
 import { RequestLifecycle } from "./RequestLifecycle";
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+/*
+ * `any` mirrors the variance holes in Effect's own `gen`/`fn` signatures —
+ * narrowing them breaks inference. `{}` is deliberate too: it is the exact
+ * "no required props" check React's own types use, and `object` would not
+ * distinguish a component that needs props from one that does not.
+ */
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-empty-object-type */
 
 /** Extracts the error channel from the union of effects a generator yields. */
 type ErrorOf<Eff> = [Eff] extends [never]
@@ -24,6 +30,16 @@ type Piped<Eff, AEff> = Effect.Effect<AEff, ErrorOf<Eff>, ContextOf<Eff>>;
 
 /** What a component must be by the time React sees it: renderable, infallible. */
 type Rendered<A, R> = Effect.Effect<A, never, R | RequestLifecycle>;
+
+/**
+ * A Server Component.
+ *
+ * Props stay optional in the call signature when the body declares none, so a
+ * component without props is still callable as `Page()` and not just `<Page />`.
+ */
+type Component<P, A> = {} extends P
+  ? (props?: P) => Promise<A>
+  : (props: P) => Promise<A>;
 
 export interface RSCRuntime<R, E> {
   readonly Component: {
@@ -53,46 +69,46 @@ export interface RSCRuntime<R, E> {
       <
         Eff extends Effect.Effect<any, never, R | RequestLifecycle>,
         A extends ReactNode,
-        Args extends Array<any>,
+        P extends object = {},
       >(
-        body: (...args: Args) => Generator<Eff, A, never>,
-      ): (...args: Args) => Promise<A>;
+        body: (props: P) => Generator<Eff, A, never>,
+      ): Component<P, A>;
 
       <
         Eff extends Effect.Effect<any, any, any>,
         AEff,
-        Args extends Array<any>,
         A extends ReactNode,
+        P extends object = {},
       >(
-        body: (...args: Args) => Generator<Eff, AEff, never>,
-        a: (_: Piped<Eff, AEff>, ...args: Args) => Rendered<A, R>,
-      ): (...args: Args) => Promise<A>;
+        body: (props: P) => Generator<Eff, AEff, never>,
+        a: (_: Piped<Eff, AEff>, props: P) => Rendered<A, R>,
+      ): Component<P, A>;
 
       <
         Eff extends Effect.Effect<any, any, any>,
         AEff,
-        Args extends Array<any>,
         B,
         A extends ReactNode,
+        P extends object = {},
       >(
-        body: (...args: Args) => Generator<Eff, AEff, never>,
-        a: (_: Piped<Eff, AEff>, ...args: Args) => B,
-        b: (_: B, ...args: Args) => Rendered<A, R>,
-      ): (...args: Args) => Promise<A>;
+        body: (props: P) => Generator<Eff, AEff, never>,
+        a: (_: Piped<Eff, AEff>, props: P) => B,
+        b: (_: B, props: P) => Rendered<A, R>,
+      ): Component<P, A>;
 
       <
         Eff extends Effect.Effect<any, any, any>,
         AEff,
-        Args extends Array<any>,
         B,
         C,
         A extends ReactNode,
+        P extends object = {},
       >(
-        body: (...args: Args) => Generator<Eff, AEff, never>,
-        a: (_: Piped<Eff, AEff>, ...args: Args) => B,
-        b: (_: B, ...args: Args) => C,
-        c: (_: C, ...args: Args) => Rendered<A, R>,
-      ): (...args: Args) => Promise<A>;
+        body: (props: P) => Generator<Eff, AEff, never>,
+        a: (_: Piped<Eff, AEff>, props: P) => B,
+        b: (_: B, props: P) => C,
+        c: (_: C, props: P) => Rendered<A, R>,
+      ): Component<P, A>;
     };
   };
 
@@ -214,18 +230,18 @@ export const make = <R, E>(options: Options<R, E>): RSCRuntime<R, E> => {
     runPromise,
     Component: {
       make: (
-        body: (...args: Array<any>) => Generator<any, ReactNode, never>,
+        body: (props: any) => Generator<any, ReactNode, never>,
         ...combinators: Array<any>
       ) => {
         // Forwarding straight to `Effect.fnUntraced` is what keeps this from
         // growing an error-handling API of its own.
         const toEffect = (Effect.fnUntraced as any)(body, ...combinators);
 
-        const Component = (...args: Array<any>) => {
+        const Component = (props: any) => {
           // The public overloads above are what enforce the contract; this cast
           // only bridges the erased implementation signature.
           return runPromise(
-            toEffect(...args) as Effect.Effect<
+            toEffect(props) as Effect.Effect<
               ReactNode,
               never,
               R | RequestLifecycle

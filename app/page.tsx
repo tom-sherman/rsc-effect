@@ -3,12 +3,17 @@ import { Database, RequestId } from "./services";
 import { RSC } from "./runtime";
 
 /**
- * A nested Effect component. It resolves `RequestId` independently, and gets
- * the same value as the page — same request, same runtime.
+ * A nested Effect component, with props. The generator takes exactly one
+ * argument — the props object React passes — and its type flows out to the
+ * component, so `<UserList />` without a query is a compile error.
  */
-const UserList = RSC.Component.make(function* UserList() {
+const UserList = RSC.Component.make(function* UserList({
+  query,
+}: {
+  query: string;
+}) {
   const db = yield* Database;
-  const users = yield* db.query("select name from users");
+  const users = yield* db.query(query);
 
   return (
     <ul className="flex flex-col gap-1">
@@ -45,7 +50,7 @@ export default RSC.Component.make(function* Page() {
         <h2 className="text-sm font-medium text-zinc-500">
           from a nested component
         </h2>
-        <UserList />
+        <UserList query="select name from users" />
       </section>
 
       <p className="max-w-prose text-sm leading-6 text-zinc-500">
