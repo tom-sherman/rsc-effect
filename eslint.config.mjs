@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vendored reference source (git subtree) - not part of the build.
+    "repos/**",
   ]),
 ]);
 
