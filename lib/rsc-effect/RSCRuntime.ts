@@ -1,14 +1,16 @@
-import { Cause, Effect, Exit, Layer, ManagedRuntime } from "effect"
-import { cache } from "react"
-import type { ReactNode } from "react"
-import { RequestLifecycle } from "./RequestLifecycle"
+import { Cause, Effect, Exit, Layer, ManagedRuntime } from "effect";
+import { cache } from "react";
+import type { ReactNode } from "react";
+import { RequestLifecycle } from "./RequestLifecycle";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 /** Extracts the error channel from the union of effects a generator yields. */
-type ErrorOf<Eff> = [Eff] extends [never] ? never
-  : [Eff] extends [Effect.Effect<any, infer E, any>] ? E
-  : never
+type ErrorOf<Eff> = [Eff] extends [never]
+  ? never
+  : [Eff] extends [Effect.Effect<any, infer E, any>]
+    ? E
+    : never;
 
 export interface RSCRuntime<R, E> {
   readonly Component: {
@@ -27,22 +29,22 @@ export interface RSCRuntime<R, E> {
       <
         Eff extends Effect.Effect<any, never, R | RequestLifecycle>,
         A extends ReactNode,
-        Args extends Array<any>
+        Args extends Array<any>,
       >(
-        body: (...args: Args) => Generator<Eff, A, never>
-      ): (...args: Args) => Promise<A>
+        body: (...args: Args) => Generator<Eff, A, never>,
+      ): (...args: Args) => Promise<A>;
 
       <
         Eff extends Effect.Effect<any, any, R | RequestLifecycle>,
         A extends ReactNode,
         Args extends Array<any>,
-        AError extends ReactNode
+        AError extends ReactNode,
       >(
         body: (...args: Args) => Generator<Eff, A, never>,
-        options: { readonly onError: (error: ErrorOf<Eff>) => AError }
-      ): (...args: Args) => Promise<A | AError>
-    }
-  }
+        options: { readonly onError: (error: ErrorOf<Eff>) => AError },
+      ): (...args: Args) => Promise<A | AError>;
+    };
+  };
 
   /**
    * Run an effect against this request's runtime.
@@ -52,15 +54,15 @@ export interface RSCRuntime<R, E> {
    * rendering you are usually the one catching.
    */
   readonly runPromise: <A, EX>(
-    effect: Effect.Effect<A, EX, R | RequestLifecycle>
-  ) => Promise<A>
+    effect: Effect.Effect<A, EX, R | RequestLifecycle>,
+  ) => Promise<A>;
 
   /** The layer this runtime was built from. Handy for tests. */
-  readonly layer: Layer.Layer<R | RequestLifecycle, E, never>
+  readonly layer: Layer.Layer<R | RequestLifecycle, E, never>;
 }
 
 export interface Options<R, E> {
-  readonly layer: Layer.Layer<R | RequestLifecycle, E, never>
+  readonly layer: Layer.Layer<R | RequestLifecycle, E, never>;
 
   /**
    * Share layer-built resources across concurrent requests. Defaults to `true`.
@@ -77,7 +79,7 @@ export interface Options<R, E> {
    *
    * Set to `false` for full per-request isolation.
    */
-  readonly shareResourcesAcrossRequests?: boolean | undefined
+  readonly shareResourcesAcrossRequests?: boolean | undefined;
 }
 
 /**
@@ -99,29 +101,31 @@ export interface Options<R, E> {
  * makes finalizers actually run.
  */
 export const make = <R, E>(options: Options<R, E>): RSCRuntime<R, E> => {
-  const memoMap = options.shareResourcesAcrossRequests === false
-    ? undefined
-    : Layer.makeMemoMapUnsafe()
+  const memoMap =
+    options.shareResourcesAcrossRequests === false
+      ? undefined
+      : Layer.makeMemoMapUnsafe();
 
   /**
    * `cache` is React's per-request memoization, so every component in a single
    * render shares one runtime — and each request gets its own.
    */
   const acquire = cache(() => {
-    const runtime = ManagedRuntime.make(options.layer, { memoMap })
+    const runtime = ManagedRuntime.make(options.layer, { memoMap });
 
     // Registering disposal is itself an effect, because the only way to reach
     // the injected framework adapter is through the layer.
     const ready = runtime.runPromise(
       Effect.flatMap(RequestLifecycle, (lifecycle) =>
         Effect.sync(() => {
-          lifecycle.deferUntilResponseEnd(() => runtime.dispose())
-          return lifecycle
-        }))
-    )
+          lifecycle.deferUntilResponseEnd(() => runtime.dispose());
+          return lifecycle;
+        }),
+      ),
+    );
 
-    return { runtime, ready }
-  })
+    return { runtime, ready };
+  });
 
   /**
    * Anything that gets this far is escaping to React, which will only ever see
@@ -134,24 +138,26 @@ export const make = <R, E>(options: Options<R, E>): RSCRuntime<R, E> => {
       Effect.flatMap(RequestLifecycle, (lifecycle) =>
         lifecycle.isControlFlowSignal(Cause.squash(cause))
           ? Effect.void
-          : Effect.logError(Cause.pretty(cause))))
+          : Effect.logError(Cause.pretty(cause)),
+      ),
+    );
 
   const runPromise = async <A, EX>(
-    effect: Effect.Effect<A, EX, R | RequestLifecycle>
+    effect: Effect.Effect<A, EX, R | RequestLifecycle>,
   ): Promise<A> => {
-    const { runtime, ready } = acquire()
+    const { runtime, ready } = acquire();
     // Await registration before running anything, so a failure mid-render can
     // never leave an undisposed runtime behind.
-    await ready
+    await ready;
 
-    const exit = await runtime.runPromiseExit(logEscaping(effect))
-    if (Exit.isSuccess(exit)) return exit.value
+    const exit = await runtime.runPromiseExit(logEscaping(effect));
+    if (Exit.isSuccess(exit)) return exit.value;
 
     // `Cause.squash` unwraps a defect back to the value that was originally
     // thrown. That is what makes `notFound()` and `redirect()` survive the trip
     // through Effect: Next receives the exact object it threw.
-    throw Cause.squash(exit.cause)
-  }
+    throw Cause.squash(exit.cause);
+  };
 
   return {
     layer: options.layer,
@@ -159,20 +165,32 @@ export const make = <R, E>(options: Options<R, E>): RSCRuntime<R, E> => {
     Component: {
       make: (
         body: (...args: Array<any>) => Generator<any, ReactNode, never>,
-        options?: { readonly onError: (error: any) => ReactNode }
+        options?: { readonly onError: (error: any) => ReactNode },
       ) => {
-        const toEffect = Effect.fnUntraced(body)
-        const onError = options?.onError
-        return (...args: Array<any>) => {
-          const effect = toEffect(...args)
-          const handled = onError === undefined
-            ? effect
-            : Effect.catch(effect, (error) => Effect.succeed(onError(error)))
+        const toEffect = Effect.fnUntraced(body);
+        const onError = options?.onError;
+
+        const Component = (...args: Array<any>) => {
+          const effect = toEffect(...args);
+          const handled =
+            onError === undefined
+              ? effect
+              : Effect.catch(effect, (error) => Effect.succeed(onError(error)));
           // The public overloads above are what enforce the contract; this cast
           // only bridges the erased implementation signature.
-          return runPromise(handled as Effect.Effect<ReactNode, unknown, R | RequestLifecycle>)
-        }
-      }
-    } as RSCRuntime<R, E>["Component"]
-  }
-}
+          return runPromise(
+            handled as Effect.Effect<ReactNode, unknown, R | RequestLifecycle>,
+          );
+        };
+
+        // Name the component after the generator, so it shows up as itself in
+        // React DevTools and server stack traces rather than as an anonymous
+        // arrow. `function* UserList()` is worth the keystrokes.
+        Component.displayName =
+          body.name || (body as any).displayName || "RSC.Component";
+
+        return Component;
+      },
+    } as RSCRuntime<R, E>["Component"],
+  };
+};

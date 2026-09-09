@@ -1,51 +1,52 @@
-import { Effect } from "effect"
-import { Database } from "../services"
-import { RSC } from "../runtime"
+import { Effect } from "effect";
+import { Database } from "../services";
+import { RSC } from "../runtime";
 
 /**
  * Handled inside the generator. By the time the component returns, the error
  * channel is `never` and React is none the wiser.
  */
-const HandledInline = RSC.Component.make(function* () {
-  const db = yield* Database
+const HandledInline = RSC.Component.make(function* HandledInline() {
+  const db = yield* Database;
 
   const name = yield* Effect.catchTag(
     db.findUser("grace"),
     "UserNotFound",
-    (error) => Effect.succeed(`no such user: ${error.handle}`)
-  )
+    (error) => Effect.succeed(`no such user: ${error.handle}`),
+  );
 
-  return <p className="font-mono text-sm">{name}</p>
-})
+  return <p className="font-mono text-sm">{name}</p>;
+});
 
 /**
  * Handled at the component boundary. `onError` receives the typed error —
  * `UserNotFound`, inferred from what the generator yields — not `unknown`.
  */
 const HandledAtBoundary = RSC.Component.make(
-  function* () {
-    const db = yield* Database
-    const name = yield* db.findUser("barbara")
-    return <p className="font-mono text-sm">{name}</p>
+  function* HandledAtBoundary() {
+    const db = yield* Database;
+    const name = yield* db.findUser("barbara");
+    return <p className="font-mono text-sm">{name}</p>;
   },
   {
     onError: (error) => (
       <p className="font-mono text-sm text-amber-600">
         fallback for {error.handle}
       </p>
-    )
-  }
-)
+    ),
+  },
+);
 
 /** The happy path, for contrast. */
-const Found = RSC.Component.make(function* () {
-  const db = yield* Database
+const Found = RSC.Component.make(function* Found() {
+  const db = yield* Database;
   const name = yield* Effect.catchTag(db.findUser("ada"), "UserNotFound", () =>
-    Effect.succeed("unreachable"))
-  return <p className="font-mono text-sm">{name}</p>
-})
+    Effect.succeed("unreachable"),
+  );
+  return <p className="font-mono text-sm">{name}</p>;
+});
 
-export default RSC.Component.make(function* () {
+export default RSC.Component.make(function* ExpectedErrorsPage() {
   return (
     <main className="mx-auto flex max-w-2xl flex-col gap-8 px-8 py-24">
       <h1 className="text-2xl font-semibold tracking-tight">Expected errors</h1>
@@ -63,5 +64,5 @@ export default RSC.Component.make(function* () {
         <Found />
       </section>
     </main>
-  )
-})
+  );
+});

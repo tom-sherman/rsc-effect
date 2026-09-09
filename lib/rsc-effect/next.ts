@@ -1,7 +1,7 @@
-import { Layer } from "effect"
-import { unstable_rethrow } from "next/navigation"
-import { after } from "next/server"
-import { RequestLifecycle } from "./RequestLifecycle"
+import { Layer } from "effect";
+import { unstable_rethrow } from "next/navigation";
+import { after } from "next/server";
+import { RequestLifecycle } from "./RequestLifecycle";
 
 /**
  * {@link RequestLifecycle} backed by Next.js.
@@ -15,7 +15,7 @@ export const layerRequestLifecycle = Layer.succeed(RequestLifecycle)({
    * `redirect()` was called, so runtimes get disposed on the failure paths too.
    */
   deferUntilResponseEnd: (task) => {
-    after(task)
+    after(task);
   },
 
   /**
@@ -28,10 +28,10 @@ export const layerRequestLifecycle = Layer.succeed(RequestLifecycle)({
    */
   isControlFlowSignal: (defect) => {
     try {
-      unstable_rethrow(defect)
-      return false
+      unstable_rethrow(defect);
+      return false;
     } catch {
-      return true
+      return true;
     }
-  }
-})
+  },
+});

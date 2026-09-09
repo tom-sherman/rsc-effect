@@ -8,5 +8,5 @@ export default function NotFound() {
         Effect, was captured as a defect, and still reached Next intact.
       </p>
     </main>
-  )
+  );
 }

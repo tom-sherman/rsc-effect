@@ -1,11 +1,11 @@
-"use client"
+"use client";
 
 export default function Error({
   error,
-  reset
+  reset,
 }: {
-  error: Error & { digest?: string }
-  reset: () => void
+  error: Error & { digest?: string };
+  reset: () => void;
 }) {
   return (
     <main className="mx-auto flex max-w-2xl flex-col items-start gap-4 px-8 py-24">
@@ -28,5 +28,5 @@ export default function Error({
         Try again
       </button>
     </main>
-  )
+  );
 }

@@ -1,0 +1,4 @@
+# Vendored reference source (git subtree) — never reformat, it is read-only.
+repos/
+.next/
+pnpm-lock.yaml
