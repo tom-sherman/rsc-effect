@@ -54,8 +54,10 @@ export const DatabaseLive = Layer.effect(Database)(
 );
 
 /**
- * Built once per request. If two components see the same id, they shared a
- * runtime; if a reload shows a new id, the runtime was per-request.
+ * Built once per memoized layer instance, which is *not* the same as once per
+ * request: with `shareResourcesAcrossRequests` on (the default) this layer is
+ * shared by every request that overlaps in time, so concurrent requests see the
+ * same id. Set that option to `false` and each request gets its own.
  */
 export class RequestId extends Context.Service<
   RequestId,

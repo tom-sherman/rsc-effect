@@ -1,4 +1,4 @@
-import { Cause, Effect, Exit, Layer, ManagedRuntime } from "effect";
+import { Cause, Effect, Exit, Layer, ManagedRuntime, Schema } from "effect";
 import { cache } from "react";
 import type { ReactNode } from "react";
 import { RequestLifecycle } from "./RequestLifecycle";
@@ -40,6 +40,35 @@ type Rendered<A, R> = Effect.Effect<A, never, R | RequestLifecycle>;
 type Component<P, A> = {} extends P
   ? (props?: P) => Promise<A>
   : (props: P) => Promise<A>;
+
+/** Any schema, so long as decoding it needs nothing the runtime cannot provide. */
+type AnySchema<RD> = Schema.ConstraintCodec<any, any, RD, any>;
+
+/**
+ * A server function's arguments: one schema for a one-argument function, or a
+ * tuple of schemas for several.
+ */
+type SchemaInput<RD> = AnySchema<RD> | ReadonlyArray<AnySchema<RD>>;
+
+/** The argument list as the caller passes it — encoded, straight off the wire. */
+type EncodedArgs<Input> =
+  Input extends ReadonlyArray<AnySchema<any>>
+    ? {
+        -readonly [K in keyof Input]: Input[K] extends AnySchema<any>
+          ? Input[K]["Encoded"]
+          : never;
+      }
+    : [Input extends AnySchema<any> ? Input["Encoded"] : never];
+
+/** The argument list as the handler receives it — decoded. */
+type DecodedArgs<Input> =
+  Input extends ReadonlyArray<AnySchema<any>>
+    ? {
+        -readonly [K in keyof Input]: Input[K] extends AnySchema<any>
+          ? Input[K]["Type"]
+          : never;
+      }
+    : [Input extends AnySchema<any> ? Input["Type"] : never];
 
 export interface RSCRuntime<R, E> {
   readonly Component: {
@@ -110,6 +139,46 @@ export interface RSCRuntime<R, E> {
         c: (_: C, props: P) => Rendered<A, R>,
       ): Component<P, A>;
     };
+  };
+
+  readonly ServerFn: {
+    /**
+     * Build a Server Function from a schema and an Effect handler.
+     *
+     * `input` describes the arguments: one schema for one argument, a tuple of
+     * schemas for several. The caller passes encoded values, the handler
+     * receives decoded ones, and the arity of both follows from `input`.
+     *
+     * ```ts
+     * "use server";
+     *
+     * export const rename = RSC.ServerFn.make({
+     *   input: [UserId, Schema.String],
+     *   handler: (id, name) => Effect.gen(function* () {
+     *     yield* (yield* Database).rename(id, name);
+     *   }),
+     * });
+     * ```
+     *
+     * Unlike `Component.make` the error channel is unconstrained: a failure
+     * rejects the promise the caller is awaiting, which is something a client
+     * can actually observe. Be aware that React redacts the reason in
+     * production, so a typed error you want the caller to *read* should be
+     * discharged into the return value — `Effect.catch` inside `handler` — not
+     * left in the error channel.
+     *
+     * Input that fails to decode rejects before `handler` runs.
+     */
+    readonly make: <
+      const Input extends SchemaInput<R | RequestLifecycle>,
+      A,
+      EX,
+    >(options: {
+      readonly input: Input;
+      readonly handler: (
+        ...input: DecodedArgs<Input>
+      ) => Effect.Effect<A, EX, R | RequestLifecycle>;
+    }) => (...args: EncodedArgs<Input>) => Promise<A>;
   };
 
   /**
@@ -258,5 +327,25 @@ export const make = <R, E>(options: Options<R, E>): RSCRuntime<R, E> => {
         return Component;
       },
     } as RSCRuntime<R, E>["Component"],
+
+    ServerFn: {
+      make: ({
+        input,
+        handler,
+      }: {
+        input: any;
+        handler: (...input: Array<any>) => Effect.Effect<any, any, any>;
+      }) => {
+        // Decoding the whole argument list as one tuple collapses the
+        // single-argument and multi-argument cases onto the same path.
+        const args = Schema.Tuple(Array.isArray(input) ? input : [input]);
+        const decode = Schema.decodeUnknownEffect(args);
+
+        return (...received: Array<unknown>) =>
+          runPromise(
+            Effect.flatMap(decode(received), (decoded) => handler(...decoded)),
+          );
+      },
+    } as RSCRuntime<R, E>["ServerFn"],
   };
 };

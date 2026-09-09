@@ -55,7 +55,8 @@ export default RSC.Component.make(function* Page() {
 
       <p className="max-w-prose text-sm leading-6 text-zinc-500">
         Reload and watch the server logs: the pool is acquired once and released
-        after the response, not during it.
+        after the response, not during it. Requests that overlap share it — that
+        is the memo map refcounting, not a singleton.
       </p>
 
       <nav className="flex flex-col gap-1 text-sm">
@@ -64,6 +65,9 @@ export default RSC.Component.make(function* Page() {
         </a>
         <a className="underline underline-offset-4" href="/defect">
           /defect — a crash, caught by error.tsx
+        </a>
+        <a className="underline underline-offset-4" href="/server-fn">
+          /server-fn — schema-checked Server Functions
         </a>
         <a className="underline underline-offset-4" href="/missing">
           /missing — notFound() thrown inside an Effect
