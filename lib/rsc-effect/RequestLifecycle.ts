@@ -1,26 +1,31 @@
 import { Context, Effect, Layer } from "effect"
 
 /**
- * The one thing `RSCRuntime` needs from its host framework: a way to schedule
- * work for after the response has been sent.
- *
- * Next.js provides this via `after()`. Other frameworks provide their own
- * equivalent (`waitUntil` on most edge runtimes, an `onResponseEnd` hook, or
- * just running the task immediately in a plain Node server). Injecting it as a
- * service keeps the runtime itself framework-agnostic.
+ * Everything `RSCRuntime` needs from its host framework, injected as a service
+ * so the runtime itself stays framework-agnostic.
  */
 export class RequestLifecycle extends Context.Service<RequestLifecycle, {
   /**
    * Schedule a task to run once the response is finished.
    *
+   * Next.js provides this via `after()`; most edge runtimes call it `waitUntil`.
    * Implementations must not throw, and must still run the task when the
    * request errored — otherwise runtimes leak.
    */
   readonly deferUntilResponseEnd: (task: () => Promise<void>) => void
+
+  /**
+   * Is this thrown value the framework's control flow rather than a real error?
+   *
+   * `notFound()`, `redirect()` and friends work by throwing. Effect faithfully
+   * captures those as defects, and they must reach the framework untouched — so
+   * we never treat them as errors, and never log them as such.
+   */
+  readonly isControlFlowSignal: (defect: unknown) => boolean
 }>()("RSCRuntime/RequestLifecycle") {}
 
 /**
- * Runs deferred tasks immediately instead of after the response.
+ * Runs deferred tasks immediately and treats nothing as control flow.
  *
  * Only appropriate for tests and scripts. In a real server this disposes the
  * runtime while the response is still streaming.
@@ -28,7 +33,8 @@ export class RequestLifecycle extends Context.Service<RequestLifecycle, {
 export const layerImmediate = Layer.succeed(RequestLifecycle)({
   deferUntilResponseEnd: (task) => {
     void task()
-  }
+  },
+  isControlFlowSignal: () => false
 })
 
 /**

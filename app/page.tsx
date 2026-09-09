@@ -52,6 +52,18 @@ export default RSC.Component.make(function* Page() {
         Reload and watch the server logs: the pool is acquired once and released
         after the response, not during it.
       </p>
+
+      <nav className="flex flex-col gap-1 text-sm">
+        <a className="underline underline-offset-4" href="/expected">
+          /expected — handled in Effect, never reaches a boundary
+        </a>
+        <a className="underline underline-offset-4" href="/defect">
+          /defect — a crash, caught by error.tsx
+        </a>
+        <a className="underline underline-offset-4" href="/missing">
+          /missing — notFound() thrown inside an Effect
+        </a>
+      </nav>
     </main>
   );
 });

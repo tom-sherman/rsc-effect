@@ -1,13 +1,19 @@
-import { Context, Effect, Layer } from "effect"
+import { Context, Effect, Layer, Schema } from "effect"
 
 /**
  * A stand-in for something with a real lifecycle — a connection pool, a client
  * that needs closing. The acquire/release logs are the point: they show when
  * the runtime is actually built and torn down.
  */
+/** An expected error: part of the domain, and part of the type. */
+export class UserNotFound extends Schema.TaggedError<UserNotFound>()("UserNotFound", {
+  handle: Schema.String
+}) {}
+
 export class Database extends Context.Service<Database, {
   readonly poolId: string
   readonly query: (sql: string) => Effect.Effect<ReadonlyArray<string>>
+  readonly findUser: (handle: string) => Effect.Effect<string, UserNotFound>
 }>()("app/Database") {}
 
 export const DatabaseLive = Layer.effect(Database)(
@@ -27,6 +33,14 @@ export const DatabaseLive = Layer.effect(Database)(
         yield* Effect.log(`query: ${sql}`)
         yield* Effect.sleep("50 millis")
         return ["ada", "grace", "barbara"] as ReadonlyArray<string>
+      }),
+
+      findUser: Effect.fnUntraced(function* (handle: string) {
+        yield* Effect.log(`findUser: ${handle}`)
+        if (handle !== "ada") {
+          return yield* new UserNotFound({ handle })
+        }
+        return "Ada Lovelace"
       })
     }
   })
