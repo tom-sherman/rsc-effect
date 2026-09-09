@@ -12,16 +12,40 @@ type ErrorOf<Eff> = [Eff] extends [never]
     ? E
     : never;
 
+/** Extracts the requirements from the union of effects a generator yields. */
+type ContextOf<Eff> = [Eff] extends [never]
+  ? never
+  : [Eff] extends [Effect.Effect<any, any, infer R>]
+    ? R
+    : never;
+
+/** The effect a generator body denotes, as combinators after it will see it. */
+type Piped<Eff, AEff> = Effect.Effect<AEff, ErrorOf<Eff>, ContextOf<Eff>>;
+
+/** What a component must be by the time React sees it: renderable, infallible. */
+type Rendered<A, R> = Effect.Effect<A, never, R | RequestLifecycle>;
+
 export interface RSCRuntime<R, E> {
   readonly Component: {
     /**
      * Build a Server Component from an Effect generator.
      *
-     * The error channel must be `never`. React has no way to hand a typed
+     * The error channel must end up `never`. React has no way to hand a typed
      * failure back to you — it only knows how to throw at an error boundary —
      * so expected errors have to be dealt with while still inside Effect.
-     * Handle them in the generator, pass `onError` to render a fallback, or
-     * say `Effect.orDie` to declare them genuinely unexpected.
+     *
+     * Combinators can follow the body, exactly as `Effect.fn` accepts them.
+     * That is where `Effect.catch` and `Effect.withSpan` go:
+     *
+     * ```ts
+     * RSC.Component.make(
+     *   function* User() {
+     *     return <p>{yield* db.findUser("ada")}</p>;
+     *   },
+     *   Effect.catch((error) => Effect.succeed(<NotFound handle={error.handle} />)),
+     *   Effect.withSpan("User"),
+     * );
+     * ```
      *
      * Defects are left alone and reach the nearest error boundary.
      */
@@ -35,14 +59,40 @@ export interface RSCRuntime<R, E> {
       ): (...args: Args) => Promise<A>;
 
       <
-        Eff extends Effect.Effect<any, any, R | RequestLifecycle>,
-        A extends ReactNode,
+        Eff extends Effect.Effect<any, any, any>,
+        AEff,
         Args extends Array<any>,
-        AError extends ReactNode,
+        A extends ReactNode,
       >(
-        body: (...args: Args) => Generator<Eff, A, never>,
-        options: { readonly onError: (error: ErrorOf<Eff>) => AError },
-      ): (...args: Args) => Promise<A | AError>;
+        body: (...args: Args) => Generator<Eff, AEff, never>,
+        a: (_: Piped<Eff, AEff>, ...args: Args) => Rendered<A, R>,
+      ): (...args: Args) => Promise<A>;
+
+      <
+        Eff extends Effect.Effect<any, any, any>,
+        AEff,
+        Args extends Array<any>,
+        B,
+        A extends ReactNode,
+      >(
+        body: (...args: Args) => Generator<Eff, AEff, never>,
+        a: (_: Piped<Eff, AEff>, ...args: Args) => B,
+        b: (_: B, ...args: Args) => Rendered<A, R>,
+      ): (...args: Args) => Promise<A>;
+
+      <
+        Eff extends Effect.Effect<any, any, any>,
+        AEff,
+        Args extends Array<any>,
+        B,
+        C,
+        A extends ReactNode,
+      >(
+        body: (...args: Args) => Generator<Eff, AEff, never>,
+        a: (_: Piped<Eff, AEff>, ...args: Args) => B,
+        b: (_: B, ...args: Args) => C,
+        c: (_: C, ...args: Args) => Rendered<A, R>,
+      ): (...args: Args) => Promise<A>;
     };
   };
 
@@ -165,21 +215,21 @@ export const make = <R, E>(options: Options<R, E>): RSCRuntime<R, E> => {
     Component: {
       make: (
         body: (...args: Array<any>) => Generator<any, ReactNode, never>,
-        options?: { readonly onError: (error: any) => ReactNode },
+        ...combinators: Array<any>
       ) => {
-        const toEffect = Effect.fnUntraced(body);
-        const onError = options?.onError;
+        // Forwarding straight to `Effect.fnUntraced` is what keeps this from
+        // growing an error-handling API of its own.
+        const toEffect = (Effect.fnUntraced as any)(body, ...combinators);
 
         const Component = (...args: Array<any>) => {
-          const effect = toEffect(...args);
-          const handled =
-            onError === undefined
-              ? effect
-              : Effect.catch(effect, (error) => Effect.succeed(onError(error)));
           // The public overloads above are what enforce the contract; this cast
           // only bridges the erased implementation signature.
           return runPromise(
-            handled as Effect.Effect<ReactNode, unknown, R | RequestLifecycle>,
+            toEffect(...args) as Effect.Effect<
+              ReactNode,
+              never,
+              R | RequestLifecycle
+            >,
           );
         };
 

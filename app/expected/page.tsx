@@ -19,8 +19,9 @@ const HandledInline = RSC.Component.make(function* HandledInline() {
 });
 
 /**
- * Handled at the component boundary. `onError` receives the typed error —
- * `UserNotFound`, inferred from what the generator yields — not `unknown`.
+ * Handled at the component boundary, with the same combinators you would use
+ * anywhere else in Effect. `error` is `UserNotFound`, inferred from what the
+ * generator yields — not `unknown`.
  */
 const HandledAtBoundary = RSC.Component.make(
   function* HandledAtBoundary() {
@@ -28,13 +29,14 @@ const HandledAtBoundary = RSC.Component.make(
     const name = yield* db.findUser("barbara");
     return <p className="font-mono text-sm">{name}</p>;
   },
-  {
-    onError: (error) => (
+  Effect.catch((error) =>
+    Effect.succeed(
       <p className="font-mono text-sm text-amber-600">
         fallback for {error.handle}
-      </p>
+      </p>,
     ),
-  },
+  ),
+  Effect.withSpan("HandledAtBoundary"),
 );
 
 /** The happy path, for contrast. */
