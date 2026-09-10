@@ -3,6 +3,22 @@
 An experiment in building React Server Components out of Effect, with the
 framework kept behind an interface.
 
+## Background
+
+[Nikhil S Nayak's _Introducing Effective RSC_](https://www.nikhilsnayak.dev/blog/introducing-effective-rsc)
+shows what happens when you wire Effect directly into a React framework: you get
+request-scoped services, typed errors, and the full Effect toolkit integrated at
+the framework level. That is the most powerful form of the idea, and worth
+reading before going further.
+
+This project takes a complementary angle. Rather than patching the framework,
+it wraps the Effect in a thin adapter layer so the same Effect-native components
+and server functions can be dropped into any React framework that supports RSC
+today — Next.js first, others by writing a small adapter. You give up some of
+the depth you get from a framework-level integration, but you gain portability
+and the ability to write Effect-native components once and reuse them across
+projects without coupling them to a single framework's internals.
+
 ## The idea
 
 A Server Component is just an async function that returns JSX. That is a small
