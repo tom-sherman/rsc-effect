@@ -36,17 +36,19 @@ export default RSC.Component.make(function* Page() {
 });
 ```
 
-The generator body is an `Effect.fn`, so combinators follow it exactly as they
-would anywhere else in Effect:
+`make` takes an Effect just as happily as a generator, so there is no
+combinator API to learn — catching, spans, retries and the rest are ordinary
+`.pipe`:
 
 ```tsx
-const User = RSC.Component.make(
-  function* User({ handle }: { handle: string }) {
+const User = RSC.Component.make((props: { handle: string }) =>
+  Effect.gen(function* () {
     const db = yield* Database;
-    return <p>{yield* db.findUser(handle)}</p>;
-  },
-  Effect.catch((error) => Effect.succeed(<NotFound handle={error.handle} />)),
-  Effect.withSpan("User"),
+    return <p>{yield* db.findUser(props.handle)}</p>;
+  }).pipe(
+    Effect.catch((error) => Effect.succeed(<NotFound handle={error.handle} />)),
+    Effect.withSpan("User"),
+  ),
 );
 ```
 

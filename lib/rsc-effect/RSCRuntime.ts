@@ -11,23 +11,6 @@ import { RequestLifecycle } from "./RequestLifecycle";
  */
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-empty-object-type */
 
-/** Extracts the error channel from the union of effects a generator yields. */
-type ErrorOf<Eff> = [Eff] extends [never]
-  ? never
-  : [Eff] extends [Effect.Effect<any, infer E, any>]
-    ? E
-    : never;
-
-/** Extracts the requirements from the union of effects a generator yields. */
-type ContextOf<Eff> = [Eff] extends [never]
-  ? never
-  : [Eff] extends [Effect.Effect<any, any, infer R>]
-    ? R
-    : never;
-
-/** The effect a generator body denotes, as combinators after it will see it. */
-type Piped<Eff, AEff> = Effect.Effect<AEff, ErrorOf<Eff>, ContextOf<Eff>>;
-
 /** What a component must be by the time React sees it: renderable, infallible. */
 type Rendered<A, R> = Effect.Effect<A, never, R | RequestLifecycle>;
 
@@ -73,22 +56,32 @@ type DecodedArgs<Input> =
 export interface RSCRuntime<R, E> {
   readonly Component: {
     /**
-     * Build a Server Component from an Effect generator.
+     * Build a Server Component, from a generator or from an Effect.
      *
-     * The error channel must end up `never`. React has no way to hand a typed
+     * The error channel must be `never`. React has no way to hand a typed
      * failure back to you — it only knows how to throw at an error boundary —
      * so expected errors have to be dealt with while still inside Effect.
      *
-     * Combinators can follow the body, exactly as `Effect.fn` accepts them.
-     * That is where `Effect.catch` and `Effect.withSpan` go:
+     * The generator form is the short one, for a component that only needs its
+     * services:
      *
      * ```ts
-     * RSC.Component.make(
-     *   function* User() {
-     *     return <p>{yield* db.findUser("ada")}</p>;
-     *   },
-     *   Effect.catch((error) => Effect.succeed(<NotFound handle={error.handle} />)),
-     *   Effect.withSpan("User"),
+     * RSC.Component.make(function* User({ handle }: Props) {
+     *   return <p>{yield* (yield* Database).find(handle)}</p>;
+     * });
+     * ```
+     *
+     * Anything else — catching errors, adding a span, retrying — is an Effect
+     * you built however you liked, so combinators are just `.pipe`:
+     *
+     * ```ts
+     * RSC.Component.make((props: Props) =>
+     *   Effect.gen(function* () {
+     *     return <p>{yield* (yield* Database).find(props.handle)}</p>;
+     *   }).pipe(
+     *     Effect.catch((error) => Effect.succeed(<NotFound {...error} />)),
+     *     Effect.withSpan("User"),
+     *   ),
      * );
      * ```
      *
@@ -103,40 +96,8 @@ export interface RSCRuntime<R, E> {
         body: (props: P) => Generator<Eff, A, never>,
       ): Component<P, A>;
 
-      <
-        Eff extends Effect.Effect<any, any, any>,
-        AEff,
-        A extends ReactNode,
-        P extends object = {},
-      >(
-        body: (props: P) => Generator<Eff, AEff, never>,
-        a: (_: Piped<Eff, AEff>, props: P) => Rendered<A, R>,
-      ): Component<P, A>;
-
-      <
-        Eff extends Effect.Effect<any, any, any>,
-        AEff,
-        B,
-        A extends ReactNode,
-        P extends object = {},
-      >(
-        body: (props: P) => Generator<Eff, AEff, never>,
-        a: (_: Piped<Eff, AEff>, props: P) => B,
-        b: (_: B, props: P) => Rendered<A, R>,
-      ): Component<P, A>;
-
-      <
-        Eff extends Effect.Effect<any, any, any>,
-        AEff,
-        B,
-        C,
-        A extends ReactNode,
-        P extends object = {},
-      >(
-        body: (props: P) => Generator<Eff, AEff, never>,
-        a: (_: Piped<Eff, AEff>, props: P) => B,
-        b: (_: B, props: P) => C,
-        c: (_: C, props: P) => Rendered<A, R>,
+      <A extends ReactNode, P extends object = {}>(
+        body: Rendered<A, R> | ((props: P) => Rendered<A, R>),
       ): Component<P, A>;
     };
   };
@@ -298,13 +259,13 @@ export const make = <R, E>(options: Options<R, E>): RSCRuntime<R, E> => {
     layer: options.layer,
     runPromise,
     Component: {
-      make: (
-        body: (props: any) => Generator<any, ReactNode, never>,
-        ...combinators: Array<any>
-      ) => {
-        // Forwarding straight to `Effect.fnUntraced` is what keeps this from
-        // growing an error-handling API of its own.
-        const toEffect = (Effect.fnUntraced as any)(body, ...combinators);
+      make: (body: any) => {
+        // `yield*` accepts a generator object and an Effect alike, so the two
+        // forms need no telling apart: call the body if it is a function, then
+        // delegate to whatever came back.
+        const toEffect = Effect.fnUntraced(function* (props: any) {
+          return yield* typeof body === "function" ? body(props) : body;
+        });
 
         const Component = (props: any) => {
           // The public overloads above are what enforce the contract; this cast
@@ -318,11 +279,12 @@ export const make = <R, E>(options: Options<R, E>): RSCRuntime<R, E> => {
           );
         };
 
-        // Name the component after the generator, so it shows up as itself in
-        // React DevTools and server stack traces rather than as an anonymous
-        // arrow. `function* UserList()` is worth the keystrokes.
+        // Name the component after the body, so it shows up as itself in React
+        // DevTools and server stack traces rather than as an anonymous arrow.
+        // `function* UserList()` is worth the keystrokes.
         Component.displayName =
-          body.name || (body as any).displayName || "RSC.Component";
+          (typeof body === "function" && (body.name || body.displayName)) ||
+          "RSC.Component";
 
         return Component;
       },
