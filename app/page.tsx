@@ -54,9 +54,10 @@ export default RSC.Component.make(function* Page() {
       </section>
 
       <p className="max-w-prose text-sm leading-6 text-zinc-500">
-        Reload and watch the server logs: the pool is acquired once and released
-        after the response, not during it. Requests that overlap share it — that
-        is the memo map refcounting, not a singleton.
+        Reload and watch: the request id changes, the pool id does not. The pool
+        is in the shared layer, acquired on the first request and held for the
+        life of the process; the request id is in the request layer, built again
+        for every one and released with the response.
       </p>
 
       <nav className="flex flex-col gap-1 text-sm">

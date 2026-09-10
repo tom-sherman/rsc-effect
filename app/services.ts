@@ -1,10 +1,5 @@
 import { Context, Effect, Layer, Schema } from "effect";
 
-/**
- * A stand-in for something with a real lifecycle — a connection pool, a client
- * that needs closing. The acquire/release logs are the point: they show when
- * the runtime is actually built and torn down.
- */
 /** An expected error: part of the domain, and part of the type. */
 export class UserNotFound extends Schema.TaggedError<UserNotFound>()(
   "UserNotFound",
@@ -13,6 +8,12 @@ export class UserNotFound extends Schema.TaggedError<UserNotFound>()(
   },
 ) {}
 
+/**
+ * A stand-in for something with a real lifecycle — a connection pool, a client
+ * that needs closing. This one goes in the runtime's `shared` layer, so the
+ * acquire log appears once, on the first request, and the release log not at
+ * all until the process ends.
+ */
 export class Database extends Context.Service<
   Database,
   {
@@ -54,10 +55,9 @@ export const DatabaseLive = Layer.effect(Database)(
 );
 
 /**
- * Built once per memoized layer instance, which is *not* the same as once per
- * request: with `shareResourcesAcrossRequests` on (the default) this layer is
- * shared by every request that overlaps in time, so concurrent requests see the
- * same id. Set that option to `false` and each request gets its own.
+ * The other half: this one goes in the `request` layer, so it is built again
+ * for every request and torn down with the response. Two concurrent requests
+ * see two different ids and the same {@link Database}.
  */
 export class RequestId extends Context.Service<
   RequestId,
@@ -67,5 +67,15 @@ export class RequestId extends Context.Service<
 >()("app/RequestId") {}
 
 export const RequestIdLive = Layer.effect(RequestId)(
-  Effect.sync(() => ({ value: crypto.randomUUID().slice(0, 8) })),
+  Effect.acquireRelease(
+    Effect.sync(() => {
+      const value = crypto.randomUUID().slice(0, 8);
+      console.log(`\x1b[36m[request ${value}] opened\x1b[0m`);
+      return { value };
+    }),
+    ({ value }) =>
+      Effect.sync(() =>
+        console.log(`\x1b[35m[request ${value}] closed\x1b[0m`),
+      ),
+  ),
 );

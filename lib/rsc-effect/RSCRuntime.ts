@@ -1,4 +1,14 @@
-import { Cause, Effect, Exit, Layer, ManagedRuntime, Schema } from "effect";
+import {
+  Cause,
+  Context,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  ManagedRuntime,
+  Schema,
+  Scope,
+} from "effect";
 import { cache } from "react";
 import type { ReactNode } from "react";
 import { RequestLifecycle } from "./RequestLifecycle";
@@ -17,8 +27,18 @@ import { RequestLifecycle } from "./RequestLifecycle";
  */
 const GeneratorFunction = Object.getPrototypeOf(function* () {}).constructor;
 
+/**
+ * What the runtime provides on top of the application's own services.
+ *
+ * {@link RequestLifecycle} is the host adapter. `Scope` is the request's own
+ * scope — the one the request layer was built into — so an `acquireRelease` in
+ * a component or a handler is released when the response is finished, without
+ * having to be a layer first.
+ */
+type Ambient = RequestLifecycle | Scope.Scope;
+
 /** What a component must be by the time React sees it: renderable, infallible. */
-type Rendered<A, R> = Effect.Effect<A, never, R | RequestLifecycle>;
+type Rendered<A, R> = Effect.Effect<A, never, R | Ambient>;
 
 /**
  * A Server Component.
@@ -96,7 +116,7 @@ export interface RSCRuntime<R, E> {
      */
     readonly make: {
       <
-        Eff extends Effect.Effect<any, never, R | RequestLifecycle>,
+        Eff extends Effect.Effect<any, never, R | Ambient>,
         A extends ReactNode,
         P extends object = {},
       >(
@@ -170,17 +190,17 @@ export interface RSCRuntime<R, E> {
      * What is left — only a defect now — rejects, and means what a 500 means.
      */
     readonly make: <
-      const Input extends SchemaInput<R | RequestLifecycle>,
+      const Input extends SchemaInput<R | Ambient>,
       A,
       B = never,
     >(options: {
       readonly input: Input;
       readonly handler: (
         ...input: DecodedArgs<Input>
-      ) => Effect.Effect<A, never, R | RequestLifecycle>;
+      ) => Effect.Effect<A, never, R | Ambient>;
       readonly onInputError: (
         error: Schema.SchemaError,
-      ) => Effect.Effect<B, never, R | RequestLifecycle>;
+      ) => Effect.Effect<B, never, R | Ambient>;
     }) => (...args: EncodedArgs<Input>) => Promise<A | B>;
   };
 
@@ -192,39 +212,58 @@ export interface RSCRuntime<R, E> {
    * rendering you are usually the one catching.
    */
   readonly runPromise: <A, EX>(
-    effect: Effect.Effect<A, EX, R | RequestLifecycle>,
+    effect: Effect.Effect<A, EX, R | Ambient>,
   ) => Promise<A>;
 
-  /** The layer this runtime was built from. Handy for tests. */
+  /**
+   * Release the shared services.
+   *
+   * A server never calls this — the whole point of the shared layer is that it
+   * outlives every request. Tests and scripts are why it exists.
+   */
+  readonly dispose: () => Promise<void>;
+
+  /**
+   * The two layers composed into one, request over shared. Handy for tests:
+   * `Effect.provide(program, RSC.layer)` gives you the same services a
+   * component sees, minus the request scope, which `Effect.scoped` supplies.
+   */
   readonly layer: Layer.Layer<R | RequestLifecycle, E, never>;
 }
 
-export interface Options<R, E> {
-  readonly layer: Layer.Layer<R | RequestLifecycle, E, never>;
+export interface Options<RShared, RRequest, E> {
+  /**
+   * Services built once, on first use, and shared by every request from then
+   * on. A connection pool, an HTTP client, a cache — anything whose cost is in
+   * building it and whose contents are nobody's in particular.
+   *
+   * Their finalizers run when {@link RSCRuntime.dispose} is called, which in a
+   * server is never.
+   */
+  readonly shared?: Layer.Layer<RShared, E, never> | undefined;
 
   /**
-   * Share layer-built resources across concurrent requests. Defaults to `true`.
+   * Services built fresh for each request, into a scope that closes once the
+   * response is finished. Anything that is *about* the request belongs here:
+   * its id, the authenticated user, a transaction, a per-request cache — and
+   * {@link RequestLifecycle}, which is how the runtime learns when to close
+   * that scope in the first place.
    *
-   * Effect's `MemoMap` refcounts memoized layers: each request's runtime adds an
-   * observer, and a layer's own scope closes only when the last observer goes
-   * away. So a connection pool is built once and shared while requests overlap,
-   * rather than rebuilt per request.
-   *
-   * The flip side is that it is refcounting, not a singleton — when the server
-   * goes idle the count hits zero and the pool is torn down, then rebuilt on the
-   * next request. If you need something to live for the whole process, build it
-   * outside this runtime.
-   *
-   * Set to `false` for full per-request isolation.
+   * It may depend on anything in {@link Options.shared}, which is the whole
+   * reason the split is two layers rather than one runtime and a flag: "who
+   * outlives whom" is exactly what a `Layer`'s dependency edge already says.
    */
-  readonly shareResourcesAcrossRequests?: boolean | undefined;
+  readonly request: Layer.Layer<RRequest | RequestLifecycle, E, RShared>;
 }
 
 /**
  * Create a module-hoisted runtime for Server Components.
  *
  * ```ts
- * const RSC = RSCRuntime.make({ layer: AppLayer })
+ * const RSC = RSCRuntime.make({
+ *   shared: DatabaseLive,
+ *   request: Layer.mergeAll(CurrentUserLive, layerRequestLifecycle),
+ * })
  *
  * export default RSC.Component.make(function* () {
  *   const db = yield* Database
@@ -232,38 +271,73 @@ export interface Options<R, E> {
  * })
  * ```
  *
- * The `RSCRuntime` value is a singleton, but the `ManagedRuntime` underneath it
- * is not: one is created per request (memoized with React's `cache`) and
- * disposed via {@link RequestLifecycle} once the response is finished. That is
- * what keeps request-scoped services from bleeding between requests, and what
- * makes finalizers actually run.
+ * Two layers, two lifetimes, and one scope each. `shared` is built once into a
+ * runtime that lives as long as the process. `request` is built per request
+ * (memoized with React's `cache`) into a scope that closes once the response is
+ * finished — which is what keeps request-scoped services from bleeding between
+ * requests, and what makes their finalizers actually run.
+ *
+ * Anything the request layer reaches for that the shared runtime already built
+ * is reused rather than rebuilt: `Layer.buildWithScope` forks the shared memo
+ * map, so a lookup falls through to the parent while new entries stay local to
+ * the request.
  */
-export const make = <R, E>(options: Options<R, E>): RSCRuntime<R, E> => {
-  const memoMap =
-    options.shareResourcesAcrossRequests === false
-      ? undefined
-      : Layer.makeMemoMapUnsafe();
+export const make = <RShared = never, RRequest = never, E = never>(
+  options: Options<RShared, RRequest, E>,
+): RSCRuntime<RShared | RRequest, E> => {
+  type R = RShared | RRequest;
+
+  // `Layer` is contravariant in its output, so the empty layer is not
+  // assignable to a layer that provides something. The cast is only reached
+  // when `shared` was left out, and `RShared` is `never` when it was.
+  const sharedLayer = (options.shared ?? Layer.empty) as Layer.Layer<
+    RShared,
+    E
+  >;
+
+  /**
+   * Built lazily, on the first request, and cached from then on. Nothing
+   * refcounts it, so an idle server does not tear the pool down and rebuild it
+   * on the next request — which is what the old shared memo map did.
+   */
+  const shared = ManagedRuntime.make(sharedLayer);
 
   /**
    * `cache` is React's per-request memoization, so every component in a single
-   * render shares one runtime — and each request gets its own.
+   * render shares one request context — and each request gets its own.
    */
-  const acquire = cache(() => {
-    const runtime = ManagedRuntime.make(options.layer, { memoMap });
+  const acquire = cache(() =>
+    shared.runPromise(
+      Effect.suspend(() => {
+        // "sequential" releases in reverse order of acquisition, which is the
+        // only correct order for things built on top of each other.
+        const scope = Scope.makeUnsafe("sequential");
 
-    // Registering disposal is itself an effect, because the only way to reach
-    // the injected framework adapter is through the layer.
-    const ready = runtime.runPromise(
-      Effect.flatMap(RequestLifecycle, (lifecycle) =>
-        Effect.sync(() => {
-          lifecycle.deferUntilResponseEnd(() => runtime.dispose());
-          return lifecycle;
-        }),
-      ),
-    );
+        return Layer.buildWithScope(options.request, scope).pipe(
+          // Handing the scope itself to whatever runs in this request is what
+          // lets an `Effect.acquireRelease` in a component body mean "for the
+          // rest of this response" without having to become a layer first.
+          Effect.map((context) => Context.add(context, Scope.Scope, scope)),
 
-    return { runtime, ready };
-  });
+          // Registering closure is itself an effect, because the only way to
+          // reach the injected framework adapter is through the layer.
+          Effect.tap((context) =>
+            Effect.sync(() =>
+              Context.get(context, RequestLifecycle).deferUntilResponseEnd(() =>
+                Effect.runPromise(Scope.close(scope, Exit.void)),
+              ),
+            ),
+          ),
+
+          // A layer that fails halfway has still acquired everything before the
+          // failure, and nobody has been handed the scope yet to close it.
+          Effect.onError(() => Scope.close(scope, Exit.void)),
+
+          Effect.map((context) => ({ context, scope })),
+        );
+      }),
+    ),
+  );
 
   /**
    * Anything that gets this far is escaping to React, which will only ever see
@@ -291,14 +365,20 @@ export const make = <R, E>(options: Options<R, E>): RSCRuntime<R, E> => {
     );
 
   const runPromise = async <A, EX>(
-    effect: Effect.Effect<A, EX, R | RequestLifecycle>,
+    effect: Effect.Effect<A, EX, R | Ambient>,
   ): Promise<A> => {
-    const { runtime, ready } = acquire();
-    // Await registration before running anything, so a failure mid-render can
-    // never leave an undisposed runtime behind.
-    await ready;
+    // Await the request's services before running anything, so a render that
+    // fails can never leave the request scope open.
+    const { context, scope } = await acquire();
 
-    const exit = await runtime.runPromiseExit(logEscaping(effect));
+    const exit = await shared.runPromiseExit(
+      Effect.provideContext(logEscaping(effect), context),
+      // Every run goes through the shared runtime, which would otherwise adopt
+      // forked fibers into *its* scope — the process-lifetime one. Attach them
+      // to the request instead, so a component that forks and forgets is
+      // interrupted with the response rather than outliving it.
+      { onFiberStart: Fiber.runIn(scope) },
+    );
     if (Exit.isSuccess(exit)) return exit.value;
 
     // `Cause.squash` unwraps a defect back to the value that was originally
@@ -308,7 +388,8 @@ export const make = <R, E>(options: Options<R, E>): RSCRuntime<R, E> => {
   };
 
   return {
-    layer: options.layer,
+    layer: Layer.provideMerge(options.request, sharedLayer),
+    dispose: () => shared.dispose(),
     runPromise,
     Component: {
       make: (body: any) => {
@@ -326,9 +407,7 @@ export const make = <R, E>(options: Options<R, E>): RSCRuntime<R, E> => {
             : // `suspend` so that a body throwing while it builds its effect
               // is a defect we log, rather than a bare throw at React.
               (props: any) => Effect.suspend(() => body(props))
-        ) as (
-          props: any,
-        ) => Effect.Effect<ReactNode, never, R | RequestLifecycle>;
+        ) as (props: any) => Effect.Effect<ReactNode, never, R | Ambient>;
 
         const Component = (props: any) => runPromise(toEffect(props));
 

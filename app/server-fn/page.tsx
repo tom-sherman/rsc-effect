@@ -16,7 +16,7 @@ export default RSC.Component.make(function* ServerFnPage() {
       <p className="max-w-prose text-sm leading-6 text-zinc-500">
         Rendered by request <span className="font-mono">{requestId.value}</span>
         . The functions below run in their own request, so expect a different id
-        — and a second pool in the server log.
+        — but the same pool, because that one is shared.
       </p>
 
       <section className="flex flex-col gap-3">

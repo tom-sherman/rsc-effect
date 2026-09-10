@@ -20,7 +20,10 @@ enough surface that you can build one out of something other than `async` /
   applying to rendering the same way it applies to everything else.
 
 ```tsx
-const RSC = RSCRuntime.make({ layer: AppLayer });
+const RSC = RSCRuntime.make({
+  shared: DatabaseLive,
+  request: Layer.mergeAll(CurrentUserLive, layerRequestLifecycle),
+});
 
 export default RSC.Component.make(function* Page() {
   const db = yield* Database;
@@ -52,19 +55,43 @@ const User = RSC.Component.make((props: { handle: string }) =>
 );
 ```
 
-## One runtime per request
+## Two lifetimes, two layers
 
-`RSC` is a module-hoisted singleton, but the `ManagedRuntime` underneath it is
-not. One is built per request — memoized with React's `cache`, so every
-component in a single render shares it — and disposed once the response is
-finished. That is what makes request-scoped services request-scoped, and what
-makes finalizers run at a moment that means something.
+A pool should be built once. A request id should be built every time. Both are
+services, so the difference has to live somewhere, and the natural place is the
+thing that already describes how services are built:
 
-Resources are still shared where it matters. Effect's `MemoMap` refcounts
-memoized layers, so a connection pool is built once and held for as long as
-requests overlap, rather than rebuilt per request. It is refcounting and not a
-singleton: an idle server tears the pool down and builds a new one on the next
-request.
+```ts
+RSCRuntime.make({
+  shared: Layer.mergeAll(DatabaseLive, HttpClientLive),
+  request: Layer.mergeAll(CurrentUserLive, layerRequestLifecycle),
+});
+```
+
+`shared` is built once, on the first request, into a runtime that lives as long
+as the process. Nothing refcounts it, so an idle server does not tear the pool
+down and rebuild it on the next request.
+
+`request` is built again for every request, into a `Scope` that closes once the
+response is finished. Its finalizers run at a moment that means something, and
+its services cannot bleed between requests because there is nothing to bleed
+through. Within one render the build is memoized by React's `cache`, so every
+component sees the same one.
+
+The dependency edge goes one way — `request` may use anything in `shared`, and
+`Layer`'s own types enforce it — which is another way of saying the split is not
+a new concept. It is the one `Layer` already had, given a lifetime.
+
+That request scope is also handed to the effects that run inside it, so an
+`acquireRelease` in a component body is released with the response without
+having to become a layer first:
+
+```tsx
+RSC.Component.make(function* Report() {
+  const file = yield* Effect.acquireRelease(open("report.csv"), close);
+  return <pre>{yield* file.read()}</pre>;
+});
+```
 
 ## Errors stop at the type level
 
@@ -224,15 +251,13 @@ true today:
 - Effect v4 is an RC. `repos/effect` vendors the matching source so the
   implementation can be read rather than guessed at — see `AGENTS.md`.
 - React's `cache()` does nothing inside a Server Action (there is no dispatcher
-  outside a render), so each entry point in an action builds its own runtime.
-  They are disposed correctly and still share resources through the memo map,
-  but "one runtime per request" is a rendering-time statement.
-- With a shared memo map there are no per-request services at all — every layer
-  in it is held by every request that overlaps. Per-request state means turning
-  `shareResourcesAcrossRequests` off, which gives up the sharing entirely. See
-  the first item below.
+  outside a render), so each entry point in an action builds its own request
+  layer. Each is closed correctly, and they all share the same `shared`
+  services, but "one build per request" is a rendering-time statement.
+- The shared runtime is never disposed by anything but `RSC.dispose()`, which a
+  server never calls. If a shared service needs to survive a hot reload or be
+  torn down on a signal, that is still yours to arrange.
 
 ## Todo
 
-- Find a better solution for `shareResourcesAcrossRequests`. It should be possible to have some services be shared across requests, and some not. Is having two different runtimes the right solution here?
 - Make our own `<form action>` and `useActionState` wrappers that deal in effects instead of promises
