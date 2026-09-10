@@ -3,22 +3,6 @@
 An experiment in building React Server Components out of Effect, with the
 framework kept behind an interface.
 
-## Background
-
-[Nikhil S Nayak's _Introducing Effective RSC_](https://www.nikhilsnayak.dev/blog/introducing-effective-rsc)
-shows what happens when you wire Effect directly into a React framework: you get
-request-scoped services, typed errors, and the full Effect toolkit integrated at
-the framework level. That is the most powerful form of the idea, and worth
-reading before going further.
-
-This project takes a complementary angle. Rather than patching the framework,
-it wraps the Effect in a thin adapter layer so the same Effect-native components
-and server functions can be dropped into any React framework that supports RSC
-today — Next.js first, others by writing a small adapter. You give up some of
-the depth you get from a framework-level integration, but you gain portability
-and the ability to write Effect-native components once and reuse them across
-projects without coupling them to a single framework's internals.
-
 ## The idea
 
 A Server Component is just an async function that returns JSX. That is a small
@@ -128,6 +112,20 @@ Unlike components, the error channel is unconstrained here: a caller awaiting a
 promise can observe a rejection, which a rendering React cannot. Note that React
 redacts the reason in production, so a typed error you want the caller to _read_
 still belongs in the return value.
+
+## Prior art
+
+[Nikhil S Nayak's _Introducing Effective RSC_](https://www.nikhilsnayak.dev/blog/introducing-effective-rsc)
+takes the idea further by building a whole new React framework with Effect woven
+through it at every level — deeply integrated, and extremely cool. If you are
+starting fresh that is the more powerful approach.
+
+This project is a complementary, framework-agnostic spin on the same idea: a
+thin adapter layer so you can write Effect-native components and server functions
+once and drop them into an existing React framework — Next.js first, others by
+writing a small adapter. You trade some of the depth of a ground-up integration
+for portability and the ability to adopt incrementally inside a project that
+already exists.
 
 ## What "framework-agnostic" means here
 
