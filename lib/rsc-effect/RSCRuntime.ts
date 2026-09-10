@@ -11,6 +11,12 @@ import { RequestLifecycle } from "./RequestLifecycle";
  */
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-empty-object-type */
 
+/**
+ * The intrinsic %GeneratorFunction%, which has no global binding of its own.
+ * Used to tell `make`'s two body forms apart once, rather than per render.
+ */
+const GeneratorFunction = Object.getPrototypeOf(function* () {}).constructor;
+
 /** What a component must be by the time React sees it: renderable, infallible. */
 type Rendered<A, R> = Effect.Effect<A, never, R | RequestLifecycle>;
 
@@ -261,24 +267,25 @@ export const make = <R, E>(options: Options<R, E>): RSCRuntime<R, E> => {
     runPromise,
     Component: {
       make: (body: any) => {
-        // `yield*` accepts a generator object and an Effect alike, so the two
-        // forms need no telling apart — whatever the body returns, delegate
-        // to it.
-        const toEffect = Effect.fnUntraced(function* (props: any) {
-          return yield* body(props);
-        });
+        // Both forms end in an Effect, but by different routes, and which one
+        // this is never changes — so decide once, here, rather than per
+        // render. The alternative, a wrapper generator delegating to whatever
+        // the body returned, makes every `yield*` in that body pay to be
+        // forwarded twice.
+        //
+        // The public overloads are what enforce the contract; the assertion
+        // below only bridges the erased implementation signature.
+        const toEffect = (
+          body instanceof GeneratorFunction
+            ? Effect.fnUntraced(body)
+            : // `suspend` so that a body throwing while it builds its effect
+              // is a defect we log, rather than a bare throw at React.
+              (props: any) => Effect.suspend(() => body(props))
+        ) as (
+          props: any,
+        ) => Effect.Effect<ReactNode, never, R | RequestLifecycle>;
 
-        const Component = (props: any) => {
-          // The public overloads above are what enforce the contract; this cast
-          // only bridges the erased implementation signature.
-          return runPromise(
-            toEffect(props) as Effect.Effect<
-              ReactNode,
-              never,
-              R | RequestLifecycle
-            >,
-          );
-        };
+        const Component = (props: any) => runPromise(toEffect(props));
 
         // Name the component after the body, so it shows up as itself in React
         // DevTools and server stack traces rather than as an anonymous arrow.
