@@ -113,6 +113,20 @@ promise can observe a rejection, which a rendering React cannot. Note that React
 redacts the reason in production, so a typed error you want the caller to _read_
 still belongs in the return value.
 
+## Prior art
+
+[Nikhil S Nayak's _Introducing Effective RSC_](https://www.nikhilsnayak.dev/blog/introducing-effective-rsc)
+takes the idea further by building a whole new React framework with Effect woven
+through it at every level — deeply integrated, and extremely cool. If you are
+starting fresh that is the more powerful approach.
+
+This project is a complementary, framework-agnostic spin on the same idea: a
+thin adapter layer so you can write Effect-native components and server functions
+once and drop them into an existing React framework — Next.js first, others by
+writing a small adapter. You trade some of the depth of a ground-up integration
+for portability and the ability to adopt incrementally inside a project that
+already exists.
+
 ## What "framework-agnostic" means here
 
 One file in `lib/rsc-effect` imports from Next.js, and nothing else does.
