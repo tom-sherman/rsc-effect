@@ -66,9 +66,9 @@ const lenientRoster = (handles: ReadonlyArray<string>) =>
   );
 
 /**
- * A fragment with nothing left in its error channel is already a component in
- * everything but name. `make` only asks for the `() =>`, because props have to
- * arrive somewhere — the whole cost of not accepting a bare Effect.
+ * Lifting a fragment back into a component, once nothing is left in its error
+ * channel. The `() =>` is the lift itself, and the place props would arrive: a
+ * component is a function of props, which a fragment on its own is not.
  */
 const Roster = RSC.Component.make(() => strictRoster(["ada"]));
 
