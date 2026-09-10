@@ -100,6 +100,7 @@ The same idea, on the other side of the boundary:
 export const rename = RSC.ServerFn.make({
   input: [UserId, Schema.NonEmptyString],
   handler: (id, name) => Effect.gen(function* () { ... }),
+  onInputError: (error) => Effect.succeed({ _tag: "Invalid", ... } as const),
 });
 ```
 
@@ -108,10 +109,66 @@ several. Callers pass encoded values, the handler receives decoded ones, and the
 arity of both follows from `input`. A `Schema.fromFormData` input gives you a
 function you can hand straight to `<form action={...}>`.
 
-Unlike components, the error channel is unconstrained here: a caller awaiting a
-promise can observe a rejection, which a rendering React cannot. Note that React
-redacts the reason in production, so a typed error you want the caller to _read_
-still belongs in the return value.
+The error channel must be `never` here too, and for a related reason: the
+boundary carries values, not effects. In production a rejected promise reaches
+the client as a digest and nothing else — no tag, no fields, no message — so a
+typed error left in the channel is a type that lies about what the caller can do
+with it. It is also not the runtime's to send: a failure may carry a connection
+string, a row, another user's data. What crosses the boundary should be a
+choice.
+
+So discharge expected errors into the return value, which is what React and Next
+recommend independently of Effect —
+[model expected errors as return values](https://nextjs.org/docs/app/getting-started/error-handling#server-functions):
+
+```ts
+handler: (id) =>
+  Effect.match(findUser(id), {
+    onFailure: (error) => ({ ok: false, reason: error._tag }) as const,
+    onSuccess: (user) => ({ ok: true, user }) as const,
+  });
+```
+
+Input that fails to decode goes to `onInputError`, which is mandatory and has no
+default. A server function is a public HTTP endpoint — anyone holding an action
+id can post anything at it, and Next
+[says as much](https://nextjs.org/docs/app/guides/authentication): treat them
+"with the same security considerations as public-facing API endpoints". So
+malformed input is ordinary traffic rather than a broken caller, and the answer
+is a decision only you can make. A `SchemaError` names your fields, their types
+and often their expected values, so echoing one is a choice, not a default:
+
+```ts
+onInputError: (error) =>
+  Effect.succeed(SchemaIssue.makeFormatterStandardSchemaV1()(error.issue));
+```
+
+Its result joins the handler's in the success channel, so callers get
+`Promise<A | B>` — tag both sides if they need telling apart. `Effect.die` is a
+perfectly good answer too, when a bad argument really does mean your own code is
+wrong and you want the error boundary; because it returns `never` the union
+doesn't widen.
+
+What is left is only a defect, which rejects and means what a 500 means. The
+runtime logs it at error level, and logs an escaping _failure_ at debug — the
+only route to one is `runPromise`, whose error channel is open, and error-level
+logging of expected traffic hands anyone with `curl` a way to fill your log.
+
+`useActionState` needs no wrapper for any of this. It wants an action shaped
+`(previous, formData)`, which is just a two-schema `input` tuple — and since the
+previous state is posted back by the client on every submission, giving it a
+schema is not ceremony, it is the same untrusted-input rule applied to the state
+itself:
+
+```ts
+input: [SubmitState, Schema.fromFormData(...)],
+handler: (_previous, { note, times }) => …,        // -> { _tag: "Added",   … }
+onInputError: (error) => Effect.succeed(…),        // -> { _tag: "Invalid", … }
+```
+
+Both arms meet in the success channel, React hands whichever it got back to the
+form as `state`, and nothing was thrown, so nothing is redacted in production.
+It works with JavaScript disabled too.
 
 ## Prior art
 

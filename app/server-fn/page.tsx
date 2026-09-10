@@ -2,7 +2,7 @@ import { RSC } from "../runtime";
 import { RequestId } from "../services";
 import { auditNote, lookupUser, submitNote } from "./actions";
 import { listNotes } from "./store";
-import { AuditForm, LookupForm } from "./client";
+import { AuditForm, LookupForm, NoteForm } from "./client";
 
 export default RSC.Component.make(function* ServerFnPage() {
   const requestId = yield* RequestId;
@@ -35,32 +35,16 @@ export default RSC.Component.make(function* ServerFnPage() {
 
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-medium text-zinc-500">
-          a form action — Schema.fromFormData
+          a form action — Schema.fromFormData + useActionState
         </h2>
         <p className="max-w-prose text-sm leading-6 text-zinc-500">
-          No client component: the form posts straight to the server function,
-          which takes a single <code className="font-mono">FormData</code> and
-          decodes it into a struct.
+          The action takes{" "}
+          <code className="font-mono">(previous, formData)</code>, which is what{" "}
+          <code className="font-mono">useActionState</code> wants — so it needs
+          no wrapper. Submit an empty note: the decode failure comes back as
+          state, not as a thrown error.
         </p>
-        <form action={submitNote} className="flex gap-2">
-          <input
-            name="note"
-            defaultValue="shipped"
-            className="rounded border border-zinc-300 px-2 py-1 font-mono text-sm dark:border-zinc-700"
-          />
-          <input
-            name="times"
-            defaultValue="2"
-            size={3}
-            className="rounded border border-zinc-300 px-2 py-1 font-mono text-sm dark:border-zinc-700"
-          />
-          <button
-            type="submit"
-            className="rounded bg-zinc-900 px-3 py-1 text-sm text-white dark:bg-zinc-100 dark:text-zinc-900"
-          >
-            submit
-          </button>
-        </form>
+        <NoteForm action={submitNote} />
         <ul className="flex flex-col gap-1">
           {notes.map((note, i) => (
             <li key={i} className="font-mono text-sm text-zinc-500">

@@ -128,25 +128,60 @@ export interface RSCRuntime<R, E> {
      * });
      * ```
      *
-     * Unlike `Component.make` the error channel is unconstrained: a failure
-     * rejects the promise the caller is awaiting, which is something a client
-     * can actually observe. Be aware that React redacts the reason in
-     * production, so a typed error you want the caller to *read* should be
-     * discharged into the return value — `Effect.catch` inside `handler` — not
-     * left in the error channel.
+     * The error channel must be `never`, as it must for `Component.make`, and
+     * for a related reason: this boundary carries values, not effects. In
+     * production a rejected promise reaches the client as a digest and nothing
+     * else — no tag, no fields, no message — so a typed error left in the
+     * channel is a type that lies about what the caller can do with it. It is
+     * also not the runtime's to send: a failure may carry a connection string,
+     * a row, another user's data. What crosses the boundary should be chosen.
      *
-     * Input that fails to decode rejects before `handler` runs.
+     * So discharge expected errors into the return value, which is what React
+     * and Next recommend independently of Effect — *model expected errors as
+     * return values*:
+     *
+     * ```ts
+     * handler: (id) =>
+     *   Effect.match(findUser(id), {
+     *     onFailure: (error) => ({ ok: false, reason: error._tag }) as const,
+     *     onSuccess: (user) => ({ ok: true, user }) as const,
+     *   });
+     * ```
+     *
+     * Input that fails to decode goes to `onInputError`, which is mandatory
+     * and has no default. That is deliberate: a server function is a public
+     * HTTP endpoint — anyone holding an action id can post anything at it —
+     * so malformed input is ordinary traffic, not a broken caller, and what
+     * gets sent back in answer is a decision only you can make. A
+     * `SchemaError` names your fields, their types and often their expected
+     * values, so echoing one is a choice, not a default. Sending nothing back
+     * is a fine answer; so is `Effect.die`, if a bad argument really does mean
+     * your own code is wrong and you want the error boundary.
+     *
+     * ```ts
+     * onInputError: (error) =>
+     *   Effect.succeed(SchemaIssue.makeFormatterStandardSchemaV1()(error.issue));
+     * ```
+     *
+     * Its result joins the handler's in the success channel, so the caller
+     * gets `Promise<A | B>` — tag both sides if they need telling apart.
+     * `Effect.die` widens nothing, since it returns `never`.
+     *
+     * What is left — only a defect now — rejects, and means what a 500 means.
      */
     readonly make: <
       const Input extends SchemaInput<R | RequestLifecycle>,
       A,
-      EX,
+      B = never,
     >(options: {
       readonly input: Input;
       readonly handler: (
         ...input: DecodedArgs<Input>
-      ) => Effect.Effect<A, EX, R | RequestLifecycle>;
-    }) => (...args: EncodedArgs<Input>) => Promise<A>;
+      ) => Effect.Effect<A, never, R | RequestLifecycle>;
+      readonly onInputError: (
+        error: Schema.SchemaError,
+      ) => Effect.Effect<B, never, R | RequestLifecycle>;
+    }) => (...args: EncodedArgs<Input>) => Promise<A | B>;
   };
 
   /**
@@ -235,13 +270,23 @@ export const make = <R, E>(options: Options<R, E>): RSCRuntime<R, E> => {
    * the squashed head of the cause. Log the whole thing first — parallel
    * failures and span traces are otherwise lost — unless it is the framework's
    * own control flow, which is not an error at all.
+   *
+   * A defect is logged at error level, because nothing is supposed to produce
+   * one. A plain failure is a different animal and gets `Debug`: both `make`
+   * functions forbid one at the type level, so the only way to arrive here
+   * with a failure is {@link RSCRuntime.runPromise}, whose error channel is
+   * open — and everything it fronts is a public HTTP endpoint that anyone can
+   * post nonsense to. An expected failure there is traffic, not a bug, and
+   * logging traffic at error level hands out a way to fill the log.
    */
   const logEscaping = <A, EX, RX>(effect: Effect.Effect<A, EX, RX>) =>
     Effect.tapCause(effect, (cause) =>
       Effect.flatMap(RequestLifecycle, (lifecycle) =>
         lifecycle.isControlFlowSignal(Cause.squash(cause))
           ? Effect.void
-          : Effect.logError(Cause.pretty(cause)),
+          : Cause.hasDies(cause)
+            ? Effect.logError(Cause.pretty(cause))
+            : Effect.logDebug(Cause.pretty(cause)),
       ),
     );
 
@@ -301,18 +346,27 @@ export const make = <R, E>(options: Options<R, E>): RSCRuntime<R, E> => {
       make: ({
         input,
         handler,
+        onInputError,
       }: {
         input: any;
-        handler: (...input: Array<any>) => Effect.Effect<any, any, any>;
+        handler: (...input: Array<any>) => Effect.Effect<any, never, any>;
+        onInputError: (
+          error: Schema.SchemaError,
+        ) => Effect.Effect<any, never, any>;
       }) => {
         // Decoding the whole argument list as one tuple collapses the
-        // single-argument and multi-argument cases onto the same path.
+        // single-argument and multi-argument cases onto the same path. It does
+        // mean an issue path carries the argument's position, so the fields of
+        // a single-argument function sit under `[0]`.
         const args = Schema.Tuple(Array.isArray(input) ? input : [input]);
         const decode = Schema.decodeUnknownEffect(args);
 
         return (...received: Array<unknown>) =>
           runPromise(
-            Effect.flatMap(decode(received), (decoded) => handler(...decoded)),
+            Effect.matchEffect(decode(received), {
+              onFailure: onInputError,
+              onSuccess: (decoded) => handler(...decoded),
+            }),
           );
       },
     } as RSCRuntime<R, E>["ServerFn"],
