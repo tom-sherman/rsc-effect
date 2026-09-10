@@ -56,7 +56,8 @@ type DecodedArgs<Input> =
 export interface RSCRuntime<R, E> {
   readonly Component: {
     /**
-     * Build a Server Component, from a generator or from an Effect.
+     * Build a Server Component from a body that takes props: either a
+     * generator, or a function returning an Effect.
      *
      * The error channel must be `never`. React has no way to hand a typed
      * failure back to you — it only knows how to throw at an error boundary —
@@ -97,7 +98,7 @@ export interface RSCRuntime<R, E> {
       ): Component<P, A>;
 
       <A extends ReactNode, P extends object = {}>(
-        body: Rendered<A, R> | ((props: P) => Rendered<A, R>),
+        body: (props: P) => Rendered<A, R>,
       ): Component<P, A>;
     };
   };
@@ -261,10 +262,10 @@ export const make = <R, E>(options: Options<R, E>): RSCRuntime<R, E> => {
     Component: {
       make: (body: any) => {
         // `yield*` accepts a generator object and an Effect alike, so the two
-        // forms need no telling apart: call the body if it is a function, then
-        // delegate to whatever came back.
+        // forms need no telling apart — whatever the body returns, delegate
+        // to it.
         const toEffect = Effect.fnUntraced(function* (props: any) {
-          return yield* typeof body === "function" ? body(props) : body;
+          return yield* body(props);
         });
 
         const Component = (props: any) => {
@@ -283,8 +284,7 @@ export const make = <R, E>(options: Options<R, E>): RSCRuntime<R, E> => {
         // DevTools and server stack traces rather than as an anonymous arrow.
         // `function* UserList()` is worth the keystrokes.
         Component.displayName =
-          (typeof body === "function" && (body.name || body.displayName)) ||
-          "RSC.Component";
+          body.name || body.displayName || "RSC.Component";
 
         return Component;
       },

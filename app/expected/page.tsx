@@ -19,15 +19,12 @@ const HandledInline = RSC.Component.make(function* HandledInline() {
 });
 
 /**
- * Handled at the component boundary. `make` takes an Effect just as happily as
- * a generator, so combinators are plain `.pipe` — nothing special to learn, and
- * `error` is still `UserNotFound` rather than `unknown`.
- *
- * Wrap this in `function HandledAtBoundary(props) { return ... }` if you want
- * the name to survive into React DevTools; a bare Effect has none to take.
+ * Handled at the component boundary. A body can return an Effect instead of
+ * being a generator, so combinators are plain `.pipe` — nothing special to
+ * learn, and `error` is still `UserNotFound` rather than `unknown`.
  */
-const HandledAtBoundary = RSC.Component.make(
-  Effect.gen(function* () {
+const HandledAtBoundary = RSC.Component.make(function HandledAtBoundary() {
+  return Effect.gen(function* () {
     const db = yield* Database;
     const name = yield* db.findUser("barbara");
     return <p className="font-mono text-sm">{name}</p>;
@@ -40,8 +37,8 @@ const HandledAtBoundary = RSC.Component.make(
       ),
     ),
     Effect.withSpan("HandledAtBoundary"),
-  ),
-);
+  );
+});
 
 /** The happy path, for contrast. */
 const Found = RSC.Component.make(function* Found() {
