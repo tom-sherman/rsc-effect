@@ -60,13 +60,12 @@ export const submitNote = RSC.ServerFn.make({
       }),
     ),
   ),
-  handler: ({ note, times }) =>
-    Effect.gen(function* () {
-      const requestId = yield* RequestId;
-      yield* Effect.log(`submit: ${note} x${times}`);
-      addNote(
-        `${Array.from({ length: times }, () => note).join(" · ")} (request ${requestId.value})`,
-      );
-      yield* Effect.sync(() => revalidatePath("/server-fn"));
-    }),
+  handler: Effect.fn(function* ({ note, times }) {
+    const requestId = yield* RequestId;
+    yield* Effect.log(`submit: ${note} x${times}`);
+    addNote(
+      `${Array.from({ length: times }, () => note).join(" · ")} (request ${requestId.value})`,
+    );
+    yield* Effect.sync(() => revalidatePath("/server-fn"));
+  }),
 });
