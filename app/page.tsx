@@ -66,6 +66,9 @@ export default RSC.Component.make(function* Page() {
         <a className="underline underline-offset-4" href="/defect">
           /defect — a crash, caught by error.tsx
         </a>
+        <a className="underline underline-offset-4" href="/compose">
+          /compose — JSX-returning Effects, composed instead of nested
+        </a>
         <a className="underline underline-offset-4" href="/server-fn">
           /server-fn — schema-checked Server Functions
         </a>
