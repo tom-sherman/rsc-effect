@@ -73,39 +73,36 @@ const lenientRoster = (handles: ReadonlyArray<string>) =>
 const Roster = RSC.Component.make(() => strictRoster(["ada"]));
 
 export default RSC.Component.make(function* ComposePage() {
-  const strict = yield* strictRoster(["ada", "grace"]);
-  const lenient = yield* lenientRoster(["ada", "grace", "barbara"]);
-  const happy = yield* strictRoster(["ada"]);
-
   return (
     <main className="mx-auto flex max-w-2xl flex-col gap-8 px-8 py-24">
       <h1 className="text-2xl font-semibold tracking-tight">Composed UI</h1>
       <p className="max-w-prose text-sm leading-6 text-zinc-500">
-        None of these are components. They are <code>Effect</code> values that
-        return JSX, composed with the ordinary operators — so failures stay in
-        the error channel, and the caller picks the recovery policy rather than
-        the fragment picking it for everyone.
+        None of these are components. Each <code>{"{yield* …}"}</code> below
+        sits exactly where a <code>{"<Child />"}</code> would, but it is an{" "}
+        <code>Effect</code> returning JSX — so its failure stays in the error
+        channel, and the caller picks the recovery policy rather than the
+        fragment picking it for everyone.
       </p>
 
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-medium text-zinc-500">
           Effect.all — one missing user sinks the list
         </h2>
-        {strict}
+        {yield* strictRoster(["ada", "grace"])}
       </section>
 
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-medium text-zinc-500">
           Effect.forEach — recovered row by row
         </h2>
-        {lenient}
+        {yield* lenientRoster(["ada", "grace", "barbara"])}
       </section>
 
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-medium text-zinc-500">
           the same fragments, all present
         </h2>
-        {happy}
+        {yield* strictRoster(["ada"])}
       </section>
 
       <section className="flex flex-col gap-3">
